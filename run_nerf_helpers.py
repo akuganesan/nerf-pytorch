@@ -15,7 +15,10 @@ to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
 class Embedder:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
-        self.create_embedding_fn()
+        if self.kwargs['interpolate_lf_pe']:
+            self.create_interpolated_embedding_fn()
+        else:
+            self.create_embedding_fn()
         
     def create_embedding_fn(self):
         embed_fns = []
@@ -41,11 +44,52 @@ class Embedder:
         self.embed_fns = embed_fns
         self.out_dim = out_dim
         
+    def embed_and_interpolate(self, pos, f, fn):
+        """ This function samples, embeds, and interpolates"""
+        samples = pos[::2]
+        projected = fn(samples*f).unsqueeze(0).permute(0, 2, 1)
+        interpolated = torch.nn.functional.interpolate(projected, scale_factor=2, mode="linear", align_corners=True)
+        return interpolated.permute(0, 2, 1).squeeze()
+
+    def create_interpolated_embedding_fn(self):
+        """ This function interpolates the positional 
+            embedding for low frequency bands"""
+
+        embed_fns = []
+        d = self.kwargs['input_dims']
+        out_dim = 0
+        if self.kwargs['include_input']:
+            embed_fns.append(lambda x : x)
+            out_dim += d
+            
+        max_freq = self.kwargs['max_freq_log2']
+        N_freqs = self.kwargs['num_freqs']
+        
+        if self.kwargs['log_sampling']:
+            freq_bands = 2.**torch.linspace(0., max_freq, steps=N_freqs)
+        else:
+            freq_bands = torch.linspace(2.**0., 2.**max_freq, steps=N_freqs)
+            
+        for freq in freq_bands:
+            # for the lower 1/3rd of frequencies interpolate the projection
+            if freq.item() <= (max_freq / 3):
+                for p_fn in self.kwargs['periodic_fns']:
+                    embed_fns.append(lambda x, p_fn=p_fn, freq=freq : self.embed_and_interpolate(pos=x, f=freq, fn=p_fn))
+                    out_dim += d
+            # full projection
+            else:
+                for p_fn in self.kwargs['periodic_fns']:
+                    embed_fns.append(lambda x, p_fn=p_fn, freq=freq : p_fn(x * freq))
+                    out_dim += d
+                    
+        self.embed_fns = embed_fns
+        self.out_dim = out_dim
+        
     def embed(self, inputs):
         return torch.cat([fn(inputs) for fn in self.embed_fns], -1)
 
 
-def get_embedder(multires, i=0):
+def get_embedder(multires, i=0, interpolate_lf_pe=True):
     if i == -1:
         return nn.Identity(), 3
     
@@ -56,6 +100,7 @@ def get_embedder(multires, i=0):
                 'num_freqs' : multires,
                 'log_sampling' : True,
                 'periodic_fns' : [torch.sin, torch.cos],
+                'interpolate_lf_pe' : interpolate_lf_pe,
     }
     
     embedder_obj = Embedder(**embed_kwargs)
