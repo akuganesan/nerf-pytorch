@@ -44,12 +44,25 @@ class Embedder:
         self.embed_fns = embed_fns
         self.out_dim = out_dim
         
-    def embed_and_interpolate(self, pos, f, fn):
+    def embed_and_interpolate_uniform(self, pos, f, fn):
         """ This function samples, embeds, and interpolates"""
         samples = pos[::2]
         projected = fn(samples*f).unsqueeze(0).permute(0, 2, 1)
         interpolated = torch.nn.functional.interpolate(projected, scale_factor=2, mode="linear", align_corners=True)
         return interpolated.permute(0, 2, 1).squeeze()
+
+    def embed_and_interpolate_nonuniform(self, pos, f, fn):
+        """ This function samples, embeds, and interpolates non-uniformly"""
+        samples = pos[::2]
+        samples_projected = fn(samples*f)
+        intermediate_samples = pos[1::2]
+
+        slopes = (samples_projected[1::1] - samples_projected[0::1][:-1])/(samples[1::1] - samples[0::1][:-1])
+        bs = samples_projected[:-1] - (slopes*samples[:-1])
+
+        intermediate_projections = (slopes * intermediate_samples) + bs
+        interpolated_projections = torch.stack((samples_projected, torch.cat([intermediate_projections, torch.zeros(1, 3)])), dim=1)
+        return interpolated_projections.view([-1, 3])[:-1]
 
     def create_interpolated_embedding_fn(self):
         """ This function interpolates the positional 
@@ -74,7 +87,7 @@ class Embedder:
             # for the lower 1/3rd of frequencies interpolate the projection
             if freq.item() <= (max_freq / 3):
                 for p_fn in self.kwargs['periodic_fns']:
-                    embed_fns.append(lambda x, p_fn=p_fn, freq=freq : self.embed_and_interpolate(pos=x, f=freq, fn=p_fn))
+                    embed_fns.append(lambda x, p_fn=p_fn, freq=freq : self.embed_and_interpolate_nonuniform(pos=x, f=freq, fn=p_fn))
                     out_dim += d
             # full projection
             else:
