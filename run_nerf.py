@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm, trange
+from torch.utils.tensorboard import SummaryWriter
 
 import matplotlib.pyplot as plt
 
@@ -705,7 +706,7 @@ def train():
     print('VAL views are', i_val)
 
     # Summary writers
-    # writer = SummaryWriter(os.path.join(basedir, 'summaries', expname))
+    writer = SummaryWriter(os.path.join(basedir, 'summaries', expname))
     
     start = start + 1
     for i in trange(start, N_iters):
@@ -822,52 +823,40 @@ def train():
             with torch.no_grad():
                 render_path(torch.Tensor(poses[i_test]).to(device), hwf, K, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
             print('Saved test set')
-
-
     
         if i%args.i_print==0:
             tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
-        """
-            print(expname, i, psnr.numpy(), loss.numpy(), global_step.numpy())
+
+            print(expname, i, psnr.cpu().detach().numpy(), loss.cpu().detach().numpy(), global_step)
             print('iter time {:.05f}'.format(dt))
 
-            with tf.contrib.summary.record_summaries_every_n_global_steps(args.i_print):
-                tf.contrib.summary.scalar('loss', loss)
-                tf.contrib.summary.scalar('psnr', psnr)
-                tf.contrib.summary.histogram('tran', trans)
-                if args.N_importance > 0:
-                    tf.contrib.summary.scalar('psnr0', psnr0)
-
+            writer.add_scalar('loss', loss, global_step=global_step)
+            writer.add_scalar('psnr', psnr, global_step=global_step)
+            writer.add_histogram('tran', trans, global_step=global_step)
+            if args.N_importance > 0:
+                writer.add_scalar('psnr0', psnr0, global_step=global_step)
 
             if i%args.i_img==0:
-
                 # Log a rendered validation view to Tensorboard
                 img_i=np.random.choice(i_val)
                 target = images[img_i]
                 pose = poses[img_i, :3,:4]
                 with torch.no_grad():
-                    rgb, disp, acc, extras = render(H, W, focal, chunk=args.chunk, c2w=pose,
+                    rgb, disp, acc, extras = render(H, W, K, chunk=args.chunk, c2w=pose,
                                                         **render_kwargs_test)
 
                 psnr = mse2psnr(img2mse(rgb, target))
 
-                with tf.contrib.summary.record_summaries_every_n_global_steps(args.i_img):
-
-                    tf.contrib.summary.image('rgb', to8b(rgb)[tf.newaxis])
-                    tf.contrib.summary.image('disp', disp[tf.newaxis,...,tf.newaxis])
-                    tf.contrib.summary.image('acc', acc[tf.newaxis,...,tf.newaxis])
-
-                    tf.contrib.summary.scalar('psnr_holdout', psnr)
-                    tf.contrib.summary.image('rgb_holdout', target[tf.newaxis])
-
+                writer.add_image('rgb', to8b(rgb.cpu().numpy()), global_step=global_step, dataformats='HWC')
+                writer.add_image('disp', disp[...,np.newaxis], global_step=global_step, dataformats='HWC')
+                writer.add_image('acc', acc[...,np.newaxis], global_step=global_step, dataformats='HWC')
+                writer.add_scalar('psnr_holdout', psnr, global_step=global_step)
+                writer.add_image('rgb_holdout', target, global_step=global_step, dataformats='HWC')
 
                 if args.N_importance > 0:
-
-                    with tf.contrib.summary.record_summaries_every_n_global_steps(args.i_img):
-                        tf.contrib.summary.image('rgb0', to8b(extras['rgb0'])[tf.newaxis])
-                        tf.contrib.summary.image('disp0', extras['disp0'][tf.newaxis,...,tf.newaxis])
-                        tf.contrib.summary.image('z_std', extras['z_std'][tf.newaxis,...,tf.newaxis])
-        """
+                    writer.add_image('rgb0', to8b(extras['rgb0'].cpu().numpy()), global_step=global_step, dataformats='HWC')
+                    writer.add_image('disp0', extras['disp0'][...,np.newaxis], global_step=global_step, dataformats='HWC')
+                    writer.add_image('z_std', extras['z_std'][...,np.newaxis], global_step=global_step, dataformats='HWC')
 
         global_step += 1
 
