@@ -17,6 +17,25 @@ class Embedder:
         self.kwargs = kwargs
         self.create_embedding_fn()
         
+    def lfpe_interpolation(self, inp, freq, fn):
+        """ This function interpolates low frequency positional embeddings"""
+        # todo: extend to odd shaped inputs
+        if inp.shape[0]%2==0:
+            samples = torch.cat([inp[::2], inp[-1].unsqueeze(0)])
+            intermediate = inp[1::2][:-1]
+            projected = fn(freq*samples)
+            slopes = (projected[:-1][1::1] - projected[:-2][0::1]) / (samples[:-1][1::1] - samples[:-2][0::1])
+            # if slope values are nan, replace with 0
+            if torch.isnan(slopes).any():
+                slopes = torch.nan_to_num(slopes, nan=0.0)
+            bs = projected[:-2] - (slopes*samples[:-2])
+            interpolated = (slopes*intermediate) + bs
+            interleaved = torch.stack((projected[:-1], torch.cat([interpolated, projected[-1].unsqueeze(0)])),
+                                      dim=1).view(inp.t().shape).contiguous().view(inp.shape)
+            return interleaved
+        else:
+            raise ValueError('This code does not handle odd sized inputs yet.')
+        
     def create_embedding_fn(self):
         embed_fns = []
         d = self.kwargs['input_dims']
@@ -34,9 +53,15 @@ class Embedder:
             freq_bands = torch.linspace(2.**0., 2.**max_freq, steps=N_freqs)
             
         for freq in freq_bands:
-            for p_fn in self.kwargs['periodic_fns']:
-                embed_fns.append(lambda x, p_fn=p_fn, freq=freq : p_fn(x * freq))
-                out_dim += d
+            if self.kwargs['interp_lfpe'] and (freq.item() <= (max_freq / 3)):
+                # for the lower 1/3rd of frequencies interpolate the projection
+                for p_fn in self.kwargs['periodic_fns']:
+                    embed_fns.append(lambda x, p_fn=p_fn, freq=freq : self.lfpe_interpolation(inp=x, freq=freq, fn=p_fn))
+                    out_dim += d
+            else:
+                for p_fn in self.kwargs['periodic_fns']:
+                    embed_fns.append(lambda x, p_fn=p_fn, freq=freq : p_fn(x * freq))
+                    out_dim += d
                     
         self.embed_fns = embed_fns
         self.out_dim = out_dim
@@ -45,7 +70,7 @@ class Embedder:
         return torch.cat([fn(inputs) for fn in self.embed_fns], -1)
 
 
-def get_embedder(multires, i=0):
+def get_embedder(multires, i=0, interp_lfpe=False):
     if i == -1:
         return nn.Identity(), 3
     
@@ -56,6 +81,7 @@ def get_embedder(multires, i=0):
                 'num_freqs' : multires,
                 'log_sampling' : True,
                 'periodic_fns' : [torch.sin, torch.cos],
+                'interp_lfpe' : interp_lfpe,
     }
     
     embedder_obj = Embedder(**embed_kwargs)

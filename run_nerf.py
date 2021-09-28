@@ -179,7 +179,7 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
 def create_nerf(args):
     """Instantiate NeRF's MLP model.
     """
-    embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
+    embed_fn, input_ch = get_embedder(args.multires, args.i_embed, args.lfpe_interp)
 
     input_ch_views = 0
     embeddirs_fn = None
@@ -528,6 +528,10 @@ def config_parser():
                         help='frequency of testset saving')
     parser.add_argument("--i_video",   type=int, default=50000, 
                         help='frequency of render_poses video saving')
+    
+    # experimentation options
+    parser.add_argument("--lfpe_interp", action='store_true', default=False, 
+                        help='will perform interpolation on low frequency positional embeddings')
 
     return parser
 
