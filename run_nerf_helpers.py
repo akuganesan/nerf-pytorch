@@ -53,7 +53,11 @@ class Embedder:
             freq_bands = torch.linspace(2.**0., 2.**max_freq, steps=N_freqs)
             
         for freq in freq_bands:
-            if self.kwargs['interp_lfpe'] and (freq.item() <= (max_freq / 3)):
+            if self.kwargs['interp_afpe']:
+                for p_fn in self.kwargs['periodic_fns']:
+                    embed_fns.append(lambda x, p_fn=p_fn, freq=freq : self.lfpe_interpolation(inp=x, freq=freq, fn=p_fn))
+                    out_dim += d                
+            elif self.kwargs['interp_lfpe'] and (freq.item() <= (max_freq / 3)):
                 # for the lower 1/3rd of frequencies interpolate the projection
                 for p_fn in self.kwargs['periodic_fns']:
                     embed_fns.append(lambda x, p_fn=p_fn, freq=freq : self.lfpe_interpolation(inp=x, freq=freq, fn=p_fn))
@@ -70,7 +74,7 @@ class Embedder:
         return torch.cat([fn(inputs) for fn in self.embed_fns], -1)
 
 
-def get_embedder(multires, i=0, interp_lfpe=False):
+def get_embedder(multires, i=0, interp_lfpe=False, interp_afpe=False):
     if i == -1:
         return nn.Identity(), 3
     
@@ -82,6 +86,7 @@ def get_embedder(multires, i=0, interp_lfpe=False):
                 'log_sampling' : True,
                 'periodic_fns' : [torch.sin, torch.cos],
                 'interp_lfpe' : interp_lfpe,
+                'interp_afpe' : interp_afpe,
     }
     
     embedder_obj = Embedder(**embed_kwargs)

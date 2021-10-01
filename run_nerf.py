@@ -179,7 +179,7 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
 def create_nerf(args):
     """Instantiate NeRF's MLP model.
     """
-    embed_fn, input_ch = get_embedder(args.multires, args.i_embed, args.lfpe_interp)
+    embed_fn, input_ch = get_embedder(args.multires, args.i_embed, args.lfpe_interp, args.afpe_interp)
 
     input_ch_views = 0
     embeddirs_fn = None
@@ -532,6 +532,8 @@ def config_parser():
     # experimentation options
     parser.add_argument("--lfpe_interp", action='store_true', default=False, 
                         help='will perform interpolation on low frequency positional embeddings')
+    parser.add_argument("--afpe_interp", action='store_true', default=False, 
+                        help='will perform interpolation on all frequency positional embeddings')
 
     return parser
 
